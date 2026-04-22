@@ -311,7 +311,17 @@ new Vue({
     async newGame() {
       // Confirm before starting new game if current game has progress
       if (this.gameStarted && this.moves > 0 && !this.won) {
-        if (!confirm("Are you sure you want to start a new game? Your current progress will be lost.")) {
+        const result = await Swal.fire({
+          title: 'Start New Game?',
+          text: 'Your current progress will be lost. Are you sure?',
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonColor: '#10b981',
+          cancelButtonColor: '#6b7280',
+          confirmButtonText: 'Yes, start new game',
+          cancelButtonText: 'Keep playing'
+        });
+        if (!result.isConfirmed) {
           return;
         }
       }
