@@ -309,6 +309,12 @@ new Vue({
     },
 
     async newGame() {
+      // Confirm before starting new game if current game has progress
+      if (this.gameStarted && this.moves > 0 && !this.won) {
+        if (!confirm("Are you sure you want to start a new game? Your current progress will be lost.")) {
+          return;
+        }
+      }
       // Record abandoned game if player had made moves
       if (this.gameStarted && !this.won && this.moves > 0) {
         await this.saveResult(false);
