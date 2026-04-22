@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>FreeCell</title>
+
+  <!-- PWA manifest -->
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- Theme colour (browser chrome on Android) -->
+  <meta name="theme-color" content="#166534" />
+
+  <!-- iOS home-screen icon & app settings -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="FreeCell" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png" />
+  <link rel="apple-touch-icon" sizes="120x120" href="icons/icon-120.png" />
+  <link rel="apple-touch-icon" sizes="76x76"  href="icons/icon-76.png" />
+
+  <!-- Standard favicon -->
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/icon-16.png" />
+  <link rel="shortcut icon" href="favicon.ico" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="bg-green-800 min-h-screen select-none">
+
+<div id="app">
+
+  <!-- Header -->
+  <div class="game-header">
+    <div class="header-row1">
+      <span class="header-title">♠ FreeCell</span>
+      <div class="header-stats">
+        <span>{{ moves }} moves</span>
+        <span>{{ formattedTime }}</span>
+      </div>
+    </div>
+    <div class="header-row2">
+      <button class="hbtn hbtn-new"  @click="newGame">New Game</button>
+      <button class="hbtn hbtn-undo" @click="undoMove" :disabled="history.length === 0">Undo</button>
+      <button class="hbtn hbtn-hint" @click="showHint" :disabled="won" :style="hint ? 'background:#f59e0b' : ''">💡 Hint</button>
+      <button class="hbtn hbtn-stats" @click="openStats">📊 Stats</button>
+    </div>
+  </div>
+
+  <!-- Top row: Free Cells + Foundations -->
+  <div class="top-row">
+    <!-- Free Cells -->
+    <div class="top-group">
+      <div
+        v-for="(cell, i) in freeCells"
+        :key="'fc-'+i"
+        class="free-cell-slot drop-zone"
+        :class="{ 'drop-hover': dropTarget && dropTarget.zone === 'freecell' && dropTarget.index === i, 'hint-target': isHintTarget('freecell', i) }"
+        @dragover="onDragOver($event, 'freecell', i)"
+        @dragleave="onDragLeave"
+        @drop="onDrop($event, 'freecell', i)"
+        @click="onSlotClick($event, 'freecell', i)"
+        :aria-label="'Free cell ' + (i+1)"
+        role="region"
+      >
+        <div
+          v-if="cell"
+          class="card draggable"
+          :class="[cell.color === 'red' ? 'text-red-600' : 'text-gray-900', isHintSource('freecell', i, 0) ? 'hint-source' : '', isSelected('freecell', i, 0) ? 'card-selected' : '']"
+          draggable="true"
+          @dragstart="onDragStart($event, 'freecell', i, [cell])"
+          @dragend="onDragEnd"
+          @click.stop="onCardClick($event, 'freecell', i, 0, [cell])"
+          @dblclick.stop="onCardDblClick($event, 'freecell', i, 0, [cell])"
+          @touchend.stop="onCardTouch($event, 'freecell', i, 0, [cell])"
+          :aria-label="cell.id"
+          role="button"
+        >
+          <div class="card-header">
+            <span class="card-rank">{{ cell.rank }}</span>
+            <span class="card-suit-sm">{{ cell.suit }}</span>
+          </div>
+          <div class="card-body">
+            <span class="card-suit-lg">{{ cell.suit }}</span>
+          </div>
+        </div>
+        <div v-else class="empty-label">FC</div>
+      </div>
+    </div>
+
+    <!-- Foundations -->
+    <div class="top-group">
+      <div
+        v-for="(f, i) in foundations"
+        :key="'fn-'+i"
+        class="free-cell-slot drop-zone"
+        :class="{ 'drop-hover': dropTarget && dropTarget.zone === 'foundation' && dropTarget.index === i, 'hint-target': isHintTarget('foundation', i) }"
+        @dragover="onDragOver($event, 'foundation', i)"
+        @dragleave="onDragLeave"
+        @drop="onDrop($event, 'foundation', i)"
+        @click="onSlotClick($event, 'foundation', i)"
+        :aria-label="'Foundation ' + f.suit"
+        role="region"
+      >
+        <div
+          v-if="f.cards.length > 0"
+          class="card"
+          :class="f.cards[f.cards.length-1].color === 'red' ? 'text-red-600' : 'text-gray-900'"
+        >
+          <div class="card-header">
+            <span class="card-rank">{{ f.cards[f.cards.length-1].rank }}</span>
+            <span class="card-suit-sm">{{ f.cards[f.cards.length-1].suit }}</span>
+          </div>
+          <div class="card-body">
+            <span class="card-suit-lg">{{ f.cards[f.cards.length-1].suit }}</span>
+          </div>
+        </div>
+        <div v-else class="empty-label" style="font-size:1.2em">{{ f.suit }}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tableau -->
+  <div class="tableau-area">
+    <div
+      v-for="(col, colIdx) in tableau"
+      :key="'col-'+colIdx"
+      class="tableau-col"
+      @dragover="onDragOver($event, 'tableau', colIdx)"
+      @dragleave="onDragLeave"
+      @drop="onDrop($event, 'tableau', colIdx)"
+      :aria-label="'Tableau column ' + (colIdx+1)"
+      role="region"
+    >
+      <!-- Empty column drop zone -->
+      <div
+        v-if="col.length === 0"
+        class="empty-col-slot drop-zone"
+        :class="{ 'drop-hover': dropTarget && dropTarget.zone === 'tableau' && dropTarget.index === colIdx, 'hint-target': isHintTarget('tableau', colIdx) }"
+        @click="onSlotClick($event, 'tableau', colIdx)"
+      ></div>
+
+      <!-- Cards in column -->
+      <div
+        v-for="(card, cardIdx) in col"
+        :key="card.id"
+        class="card tableau-card"
+        :class="[
+          card.color === 'red' ? 'text-red-600' : 'text-gray-900',
+          cardIdx > 0 ? 'stacked' : '',
+          canDragFromTableau(colIdx, cardIdx) ? 'draggable' : 'not-draggable',
+          dropTarget && dropTarget.zone === 'tableau' && dropTarget.index === colIdx && cardIdx === col.length - 1 ? 'drop-hover-card' : '',
+          isHintSource('tableau', colIdx, cardIdx) ? 'hint-source' : '',
+          isHintTarget('tableau', colIdx) && cardIdx === col.length - 1 ? 'hint-target-card' : '',
+          isSelected('tableau', colIdx, cardIdx) ? 'card-selected' : ''
+        ]"
+        :draggable="canDragFromTableau(colIdx, cardIdx)"
+        @dragstart="canDragFromTableau(colIdx, cardIdx) && onDragStart($event, 'tableau', colIdx, col.slice(cardIdx))"
+        @dragend="onDragEnd"
+        @click.stop="onCardClick($event, 'tableau', colIdx, cardIdx, col.slice(cardIdx))"
+        @dblclick.stop="onCardDblClick($event, 'tableau', colIdx, cardIdx, col.slice(cardIdx))"
+        @touchend.stop="onCardTouch($event, 'tableau', colIdx, cardIdx, col.slice(cardIdx))"
+        :aria-label="card.id"
+        role="button"
+      >
+        <div class="card-header">
+          <span class="card-rank">{{ card.rank }}</span>
+          <span class="card-suit-sm">{{ card.suit }}</span>
+        </div>
+        <div class="card-body">
+          <span class="card-suit-lg">{{ card.suit }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats Modal -->
+  <transition name="fade">
+    <div v-if="showStats" class="stats-overlay" @click.self="closeStats">
+      <div class="stats-modal">
+
+        <div class="stats-header">
+          <h2>📊 Statistics</h2>
+          <button class="stats-close" @click="closeStats">✕</button>
+        </div>
+
+        <div class="stats-summary">
+          <div class="stat-card">
+            <div class="stat-value">{{ totalPlayed }}</div>
+            <div class="stat-label">Played</div>
+          </div>
+          <div class="stat-card green">
+            <div class="stat-value">{{ totalWon }}</div>
+            <div class="stat-label">Won</div>
+          </div>
+          <div class="stat-card blue">
+            <div class="stat-value">{{ winRate }}</div>
+            <div class="stat-label">Win Rate</div>
+          </div>
+          <div class="stat-card orange">
+            <div class="stat-value">{{ currentStreak }}</div>
+            <div class="stat-label">Streak</div>
+          </div>
+          <div class="stat-card purple">
+            <div class="stat-value">{{ bestStreak }}</div>
+            <div class="stat-label">Best</div>
+          </div>
+        </div>
+
+        <div class="stats-bests" v-if="totalWon > 0">
+          <div class="bests-row">
+            <div class="best-item">
+              <span class="best-icon">⏱</span>
+              <div>
+                <div class="best-val">{{ bestTime }}</div>
+                <div class="best-lbl">Best Time</div>
+              </div>
+            </div>
+            <div class="best-item">
+              <span class="best-icon">📊</span>
+              <div>
+                <div class="best-val">{{ avgTime }}</div>
+                <div class="best-lbl">Avg Time</div>
+              </div>
+            </div>
+            <div class="best-item">
+              <span class="best-icon">🎯</span>
+              <div>
+                <div class="best-val">{{ fewestMoves }}</div>
+                <div class="best-lbl">Fewest Moves</div>
+              </div>
+            </div>
+            <div class="best-item">
+              <span class="best-icon">↗</span>
+              <div>
+                <div class="best-val">{{ avgMoves }}</div>
+                <div class="best-lbl">Avg Moves</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="stats-history">
+          <div class="history-toolbar">
+            <span class="history-title">Game History</span>
+            <div class="filter-pills">
+              <button :class="['pill', statsFilter==='all'  ? 'active' : '']" @click="setFilter('all')">All</button>
+              <button :class="['pill', statsFilter==='won'  ? 'active green' : '']" @click="setFilter('won')">Wins</button>
+              <button :class="['pill', statsFilter==='lost' ? 'active red'   : '']" @click="setFilter('lost')">Losses</button>
+            </div>
+          </div>
+
+          <div v-if="filteredResults.length === 0" class="history-empty">
+            No games yet — play one to see history!
+          </div>
+
+          <table v-else class="history-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Result</th>
+                <th>Moves</th>
+                <th>Time</th>
+                <th>Hints</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(r, i) in pagedResults" :key="i" :class="r.won ? 'row-win' : 'row-loss'">
+                <td class="row-num">{{ filteredResults.length - (statsPage * PAGE_SIZE + i) }}</td>
+                <td>
+                  <span :class="['result-badge', r.won ? 'badge-win' : 'badge-loss']">
+                    {{ r.won ? '✓ Win' : '✗ Loss' }}
+                  </span>
+                </td>
+                <td>{{ r.moves }}</td>
+                <td>{{ fmtResultTime(r.time) }}</td>
+                <td>{{ r.hintsUsed || 0 }}</td>
+                <td class="row-date">{{ fmtResultDate(r.date) }}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div v-if="totalPages > 1" class="pagination">
+            <button class="page-btn" :disabled="statsPage === 0" @click="statsPage--">‹ Prev</button>
+            <span class="page-info">{{ statsPage + 1 }} / {{ totalPages }}</span>
+            <button class="page-btn" :disabled="statsPage >= totalPages - 1" @click="statsPage++">Next ›</button>
+          </div>
+        </div>
+
+        <div class="stats-footer">
+          <button class="danger-btn" @click="clearAllResults" v-if="allResults.length > 0">🗑 Clear History</button>
+        </div>
+
+      </div>
+    </div>
+  </transition>
+
+  <!-- Win Overlay -->
+  <transition name="fade">
+    <div v-if="won" class="win-overlay" @click="newGame">
+      <div class="win-box">
+        <div style="font-size:2.5rem;margin-bottom:8px">🎉</div>
+        <h2 style="font-size:1.6rem;font-weight:800;color:#15803d;margin-bottom:4px">You Win!</h2>
+        <p style="color:#6b7280;font-size:0.9rem">{{ moves }} moves · {{ formattedTime }}</p>
+        <p style="color:#9ca3af;font-size:0.75rem;margin-top:12px">Tap anywhere to play again</p>
+      </div>
+      <div class="confetti-container" aria-hidden="true">
+        <div v-for="n in 40" :key="n" class="confetti-piece" :style="confettiStyle(n)"></div>
+      </div>
+    </div>
+  </transition>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/vue@2/dist/vue.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
